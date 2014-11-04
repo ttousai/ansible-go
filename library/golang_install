@@ -1,0 +1,129 @@
+#!/bin/bash
+# This module installs the golang release binaries for linux. 
+# 
+# parameters:
+# @name: release name of tarball to download eg. go1.3.2.linux-amd64.
+#        defaults to the latest linux tarball for current architecture.
+
+# TODO: rewrite in python and document
+
+EARGS=60
+ENET=61
+EPARSE=62
+ESUM=63
+EPERM=64
+
+# convenience command variables
+GREP="/bin/grep -E -i"
+FGREP="/bin/grep -F -i"
+
+# clean up
+cleanup() {
+	rm $output
+	unset EARGS ENET GREP FGREP output dl arch info chksum curr_ver new_ver name tar_out
+} &> /dev/null
+
+
+output=/tmp/page
+dl="http://golang.org/dl/"
+
+# iterate through module arguments
+for a in `head -n1 $1`; do
+	echo $a | $FGREP 'name'
+	if [ $? -eq 0 ]; then
+		name=`echo $a | sed -e 's/name=//' -e 's/"//g'`
+	fi
+done > /dev/null
+
+# the golang download page fails with curl if the trailing
+# '/' is omitted
+/usr/bin/curl -o $output $dl &> /dev/null
+if [ $? -ne 0 ]; then
+    echo {\"rc\": $ENET, \"failed\": true, \"msg\": \"error connecting to $dl\"}
+	cleanup
+	exit $ENET
+fi
+
+# convert linux architecture to golang style
+arch=`uname -m`
+case $arch in
+	x86_64 ) arch="amd64" ;;
+	*      ) arch="386" ;;
+esac
+
+# if name is not specified default to linux-$arch
+name=${name:-linux-$arch}
+
+# check that specified release name is linux distribution
+echo $name | $FGREP linux
+if [ $? -ne 0 ]; then
+    echo {\"rc\": $EPARSE, \"failed\": true, \"msg\": \"this module supports only linux installs currently\"}
+	cleanup
+	exit $EPARSE
+fi
+
+# there as at yet 17 distributions, so scrape first 17
+# distribution url is of form, but ignore source tarball
+# <td class="filename"><a href="https://storage.googleapis.com/golang/goversion.os-arch.ext">gover.os-arch.ext</a></td>
+# ....
+# <td><tt>checksum</tt></td>
+
+declare -a info=( `$FGREP -A4 -m1 $name $output | \
+$GREP -o 'https://[^"]*|<tt>.*</tt>' | \
+sed -e 's/<[^>]*>//g'` )
+if [ $? -ne 0 ]; then
+    echo {\"rc\": $EPARSE, \"failed\": true, \"msg\": \"error parsing for latest release\"}
+	cleanup
+	exit $EPARSE
+fi
+
+# check that release name exists on download page
+if [ -z "${info[0]}" ]; then
+	echo {\"rc\": $EPARSE, \"failed\": true, \"msg\": \"the release $name is not available, check the spelling\"}
+	cleanup
+	exit $EPARSE
+fi
+
+name=`echo ${info[0]} | cut -d'/' -f5`
+chksum=${info[1]}
+new_ver="go version `echo $name | sed -e 's/\(go.*\)\.linux.*$/\1/'` linux/$arch"
+curr_ver=`go version`
+
+
+# proceed to download install go
+tar_out="/tmp/out"
+if [ "$new_ver" != "$curr_ver" ]; then
+	/usr/bin/curl -o $tar_out ${info[0]} &> /dev/null
+	if [ $? -ne 0 ]; then
+		echo {\"rc\": $ENET, \"failed\": true, \"msg\": \"error downloading ${info[0]}\"}
+		cleanup
+		exit $ENET
+	fi
+	# checksum
+	tar_sum=`/usr/bin/sha1sum $tar_out | cut -d' ' -f1`
+	if [ "$tar_sum" != "$chksum" ]; then
+		echo {\"rc\": $ESUM, \"failed\": true, \"msg\": \"checksums do not match\"}
+		cleanup
+		exit $ESUM
+	fi
+
+	# install
+	tar -C /usr/local -xf $tar_out &> /dev/null
+	if [ $? -ne 0 ]; then
+		echo {\"rc\": $EPERM, \"failed\": true, \"msg\": \"problem extracting tarball, likely permissions\"}
+		cleanup
+		exit $EPERM
+	fi
+
+	# setup environment variables
+	cat > /etc/profile.d/go.sh <<EOF
+GOPATH=$HOME/go
+PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+export PATH GOPATH
+EOF
+
+fi
+
+# return to ansible
+echo {\"rc\": 0, \"name\": \"$name\", \"version\": \"$new_ver\"}
+cleanup
