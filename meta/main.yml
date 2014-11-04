@@ -1,7 +1,8 @@
 ---
 galaxy_info:
   author: "Davis Abubakr-Sadik Nii Nai"
-  description: "Ansible role that makes use of the golang_install module included in this role."
+  description: "Ansible role that makes use of a custom module golang_install included in this role."
+  version: 0.1
   license: MIT
   min_ansible_version: 1.3
   platforms:
