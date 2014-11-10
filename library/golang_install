@@ -116,12 +116,11 @@ if [ "$new_ver" != "$curr_ver" ]; then
 	fi
 
 	# setup environment variables
-	cat > /etc/profile.d/go.sh <<EOF
+echo '
 GOPATH=$HOME/go
 PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
 export PATH GOPATH
-EOF
-
+' > /etc/profile.d/go.sh
 fi
 
 # return to ansible
